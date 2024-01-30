@@ -35,7 +35,37 @@ def agelist(str):
             raise Exception("Bad age " + str)
 
 class Data:
-    def load_file(self, file):
+    """Configuration data"""
+    i_rate: float
+    r_rate: float
+
+    startage: int
+    endage: int
+
+    stded: float        # tax standard deduction
+    state_tax: float
+    state_cg_tax: float
+    tax_rates: list[list[int, float], ...]      # TODO: declaration correct?  or list[tuple[int, float]]
+
+    workyr: int
+    maxsave: float
+    maxsave_inflation: bool
+    worktax: float
+    retireage: int
+    numyr: int
+
+    aftertax: dict[str, float]
+    IRA: dict[str, float]
+    roth: dict[str, float]
+
+    income: list[float]
+    expenses: list[float]
+    taxed: list[float]
+
+    sepp_end: int
+    sepp_ratio: float
+
+    def __init__(self, file: str):
         with open(file) as conffile:
             d = tomllib.loads(conffile.read())
         self.i_rate = 1 + d.get('inflation', 0) / 100       # inflation rate: 2.5 -> 1.025
@@ -485,8 +515,7 @@ def main():
     args = parser.parse_args()
 
     global S
-    S = Data()
-    S.load_file(args.conffile)
+    S = Data(args.conffile)
 
     global vper, n0, n1
     vper = 4        # variables per year (savings, ira, roth, ira2roth)
