@@ -5,8 +5,7 @@ from src.fplan.fplan import Data, solve
 
 def test_sample_solve() -> None:
     """Proof of concept solver test.  Verification is intentionally light"""
-    config_data = Data()
-    config_data.load_file('test/fplan/test_solve/sample.toml')
+    config_data = Data('test/fplan/test_solve/sample.toml')
 
     res = solve(S=config_data, sepp=False, verbose=False)
     expected_spend = 128415.14
@@ -16,8 +15,7 @@ def test_sample_solve() -> None:
 def test_flat_solve() -> None:
     tolerance = 0       # Note: expect this result to be nearly exact
 
-    config_data = Data()
-    config_data.load_file('test/fplan/test_solve/flat.toml')
+    config_data = Data('test/fplan/test_solve/flat.toml')
 
     res = solve(S=config_data, sepp=False, verbose=False)
     expected_spend = 100_000.0

@@ -7,15 +7,13 @@ def test_load_file1():
     #       Pro - ensures they work
     #       Con - doubles work when changing examples
     #   For now, leave it in here.  We can delete the test if we decide against this path.
-    config_data = Data()
-    config_data.load_file('examples/sample.toml')
+    config_data = Data('examples/sample.toml')
     _check_sample_config_contents(config_data)
 
 
 def test_load_file2():
     # test using local config file
-    config_data = Data()
-    config_data.load_file('test/fplan/test_load_file/sample.toml')
+    config_data = Data('test/fplan/test_load_file/sample.toml')
     _check_sample_config_contents(config_data)
 
 def _check_sample_config_contents(cfg: Data) -> None:
