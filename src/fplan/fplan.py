@@ -8,12 +8,13 @@ except ModuleNotFoundError:
     import tomli as tomllib
 import scipy.optimize
 
-# Required Minimal Distributions from IRA starting with age 70
-RMD = [27.4, 26.5, 25.6, 24.7, 23.8, 22.9, 22.0, 21.2, 20.3, 19.5,  # age 70-79
-       18.7, 17.9, 17.1, 16.3, 15.5, 14.8, 14.1, 13.4, 12.7, 12.0,  # age 80-89
-       11.4, 10.8, 10.2,  9.6,  9.1,  8.6,  8.1,  7.6,  7.1,  6.7,  # age 90-99
-        6.3,  5.9,  5.5,  5.2,  4.9,  4.5,  4.2,  3.9,  3.7,  3.4,  # age 100+
-        3.1,  2.9,  2.6,  2.4,  2.1,  1.9,  1.9,  1.9,  1.9,  1.9]
+# Required Minimal Distributions from IRA starting with age 73
+# last updated for 2024
+RMD = [27.4, 26.5, 25.5, 24.6, 23.7, 22.9, 22.0, 21.1, 20.2, 19.4,  # age 72-81
+       18.5, 17.7, 16.8, 16.0, 15.3, 14.5, 13.7, 12.9, 12.2, 11.5,  # age 82-91
+       10.8, 10.1,  9.5,  8.9,  8.4,  7.8,  7.3,  6.8,  6.4,  6.0,  # age 92-101
+        5.6,  5.2,  4.9,  4.6,  4.3,  4.1,  3.9,  3.7,  3.5,  3.4,  # age 102+
+        3.3,  3.1,  3.0,  2.9,  2.8,  2.7,  2.5,  2.3,  2.0,  2.0]
 
 cg_tax = 0.15                   # capital gains tax rate
 
@@ -35,6 +36,10 @@ def agelist(str):
             raise Exception("Bad age " + str)
 
 class Data:
+    vper: int = 4        # variables per year (savings, ira, roth, ira2roth)
+    n1: int = 2          # before-retire years start here
+    n0: int              # post-retirement years start here
+
     def load_file(self, file):
         with open(file) as conffile:
             d = tomllib.loads(conffile.read())
@@ -79,6 +84,8 @@ class Data:
             self.workyr = 0
         self.retireage = self.startage + self.workyr
         self.numyr = self.endage - self.retireage
+
+        self.n0 = self.n1 + self.workyr * self.vper
 
         self.aftertax = d.get('aftertax', {'bal': 0})
         if 'basis' not in self.aftertax:
@@ -139,8 +146,12 @@ class Data:
 # Subject to: A_ub * x <= b_ub
 #vars: money, per year(savings, ira, roth, ira2roth)  (193 vars)
 #all vars positive
-def solve(args):
+def solve(S: Data, sepp: bool, verbose: bool = False) -> list[float]:
     # optimize this poly (we want to maximize the money we can spend)
+    vper = S.vper
+    n1 = S.n1
+    n0 = S.n0
+
     nvars = n1 + vper * (S.numyr + S.workyr)
     c = [0] * nvars
     c[0] = -1
@@ -148,7 +159,7 @@ def solve(args):
     A = []
     b = []
 
-    if not args.sepp:
+    if not sepp:
         # force SEPP to zero
         row = [0] * nvars
         row[1] = 1
@@ -322,10 +333,10 @@ def solve(args):
         b += [S.roth['bal'] * S.r_rate ** (S.workyr + year)]
 
     # starting with age 70 the user must take RMD payments
-    for year in range(max(0,70-S.retireage),S.numyr):
+    for year in range(max(0,73-S.retireage),S.numyr):
         row = [0] * nvars
         age = year + S.retireage
-        rmd = RMD[age - 70]
+        rmd = RMD[age - 72]
 
         # the gains from the initial balance minus any withdraws gives
         # the current balance.
@@ -346,18 +357,17 @@ def solve(args):
         A += [row]
         b += [-(S.IRA['bal'] * S.r_rate ** (S.workyr + year))]
 
-    if args.verbose:
+    if verbose:
         print("Num vars: ", len(c))
         print("Num contraints: ", len(b))
-    res = scipy.optimize.linprog(c, A_ub=A, b_ub=b, method="highs-ipm",
-                                 options={"disp": args.verbose})
+    res = scipy.optimize.linprog(c, A_ub=A, b_ub=b, method="highs-ipm", options={"disp": verbose})
     if res.success == False:
         print(res)
         exit(1)
 
     return res.x
 
-def print_ascii(res):
+def print_ascii(S: Data, res: list[float]) -> None:
     print("Yearly spending <= ", 100*int(res[0]/100))
     sepp = 100*int(res[1]/100)
     print("SEPP amount = ", sepp, sepp / S.sepp_ratio)
@@ -369,9 +379,9 @@ def print_ascii(res):
         print((" age" + " %5s" * 6) %
               ("save", "tSAVE", "IRA", "tIRA", "Roth", "tRoth"))
     for year in range(S.workyr):
-        fsavings = res[n1+year*vper]
-        fira = res[n1+year*vper+1]
-        froth = res[n1+year*vper+2]
+        fsavings = res[S.n1+year*S.vper]
+        fira = res[S.n1+year*S.vper+1]
+        froth = res[S.n1+year*S.vper+2]
         print((" %d:" + " %5.0f" * 6) %
               (year+S.startage,
                savings/1000, fsavings/1000,
@@ -391,10 +401,10 @@ def print_ascii(res):
     tspend = 0.0
     for year in range(S.numyr):
         i_mul = S.i_rate ** (year + S.workyr)
-        fsavings = res[n0+year*vper]
-        fira = res[n0+year*vper+1]
-        froth = res[n0+year*vper+2]
-        ira2roth = res[n0+year*vper+3]
+        fsavings = res[S.n0+year*S.vper]
+        fira = res[S.n0+year*S.vper+1]
+        froth = res[S.n0+year*S.vper+2]
+        ira2roth = res[S.n0+year*S.vper+3]
         if year < S.sepp_end:
             sepp_spend = sepp/S.sepp_ratio
         else:
@@ -427,7 +437,7 @@ def print_ascii(res):
         # aftertax basis
         if S.aftertax['basis'] > 0:
             basis = 1 - (S.aftertax['basis'] /
-                         (S.aftertax['bal']*S.r_rate**year))
+                         (S.aftertax['bal']*S.r_rate**(year + S.workyr)))
         else:
             basis = 1
         tax += fsavings * basis * (cg_tax + S.state_cg_tax)
@@ -456,7 +466,7 @@ def print_ascii(res):
     print("\ntotal spending: %.0f" % tspend)
     print("total tax: %.0f (%.1f%%)" % (ttax, 100*ttax/tspend))
 
-def print_csv(res):
+def print_csv(S: Data, res: list[float]) -> None:
     print("spend goal,%d" % res[0])
     print("savings,%d,%d" % (S.aftertax['bal'], S.aftertax['basis']))
     print("ira,%d" % S.IRA['bal'])
@@ -464,10 +474,10 @@ def print_csv(res):
 
     print("age,spend,fIRA,fROTH,IRA2R,income,expense")
     for year in range(S.numyr):
-        fsavings = res[n0+year*vper]
-        fira = res[n0+year*vper+1]
-        froth = res[n0+year*vper+2]
-        ira2roth = res[n0+year*vper+3]
+        fsavings = res[S.n0+year*S.vper]
+        fira = res[S.n0+year*S.vper+1]
+        froth = res[S.n0+year*S.vper+2]
+        ira2roth = res[S.n0+year*S.vper+3]
         print(("%d," * 6 + "%d") % (year+S.retireage,fsavings,fira,froth,ira2roth,
                                     S.income[year],S.expenses[year]))
 
@@ -484,20 +494,14 @@ def main():
     parser.add_argument('conffile')
     args = parser.parse_args()
 
-    global S
     S = Data()
     S.load_file(args.conffile)
 
-    global vper, n0, n1
-    vper = 4        # variables per year (savings, ira, roth, ira2roth)
-    n1 = 2          # before-retire years start here
-    n0 = n1+S.workyr*vper   # post-retirement years start here
-
-    res = solve(args)
+    res = solve(S, args.sepp, args.verbose)
     if args.csv:
-        print_csv(res)
+        print_csv(S, res)
     else:
-        print_ascii(res)
+        print_ascii(S, res)
 
     if args.validate:
         for y in range(1,nyears):
